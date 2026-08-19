@@ -1,0 +1,11 @@
+node_modules/
+.agents/
+skills-lock.json
+.turbo/
+.next/
+out/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.tsbuildinfo
