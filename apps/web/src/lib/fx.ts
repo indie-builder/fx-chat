@@ -2,11 +2,13 @@ import "server-only";
 
 import path from "node:path";
 import { createFxAgent, type FxAgent, type FxSession } from "libfx";
-import { DEFAULT_FX_MODEL } from "@/lib/fx-model";
+import { getFxModel } from "@/lib/fx-model";
+import { createKimiFetch } from "@/lib/kimi-fetch";
 
 type FxRuntime = {
   agent: FxAgent;
   session: FxSession;
+  subscribe: (listener: (event: unknown) => void) => () => void;
 };
 
 declare global {
@@ -14,18 +16,38 @@ declare global {
 }
 
 async function createRuntime(): Promise<FxRuntime> {
+  const model = getFxModel();
+  const kimiApiKey = process.env.KIMI_API_KEY?.trim();
+  if (!kimiApiKey) throw new Error("KIMI_API_KEY is not configured.");
+  const listeners = new Set<(event: unknown) => void>();
+  const publish = (event: unknown) => {
+    for (const listener of listeners) listener(event);
+  };
+
   const agent = await createFxAgent({
     backend: "native",
     env: {
-      AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
-      FX_MODEL: process.env.FX_MODEL?.trim() || DEFAULT_FX_MODEL,
+      AI_GATEWAY_API_KEY: "host-managed-kimi",
+      FX_MODEL: model,
     },
+    fetch: createKimiFetch(kimiApiKey, publish),
     workspaceRoot:
       process.env.FX_WORKSPACE_ROOT ?? path.resolve(process.cwd(), "../.."),
-    onPermission: async () => null,
+    onEvent: publish,
+    onPermission: async (request) => {
+      publish({ type: "permission-request", request });
+      return null;
+    },
   });
 
-  return { agent, session: await agent.createSession() };
+  return {
+    agent,
+    session: await agent.createSession(),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }
 
 export function getFxRuntime(): Promise<FxRuntime> {

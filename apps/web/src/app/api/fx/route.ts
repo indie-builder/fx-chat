@@ -1,16 +1,22 @@
 import type { FxTurn } from "libfx";
 import { getFxRuntime, resetFxRuntime } from "@/lib/fx";
+import { getFxDisplayModel, isFxConfigured } from "@/lib/fx-model";
+import {
+  encodeFxStreamEvent,
+  normalizeFxUpdate,
+  normalizeHostEvent,
+  type FxStreamEvent,
+} from "@/lib/fx-stream";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const encoder = new TextEncoder();
 const maxPromptLength = 12_000;
 
 export async function POST(request: Request) {
-  if (!process.env.AI_GATEWAY_API_KEY) {
+  if (!isFxConfigured()) {
     return Response.json(
-      { error: "AI_GATEWAY_API_KEY is not configured." },
+      { error: "KIMI_API_KEY is not configured." },
       { status: 503 }
     );
   }
@@ -34,12 +40,21 @@ export async function POST(request: Request) {
     );
   }
 
+  const startedAt = Date.now();
   let turn: FxTurn;
+  let pendingHostEvents: unknown[] = [];
+  let handleHostEvent = (event: unknown) => {
+    pendingHostEvents.push(event);
+  };
+  let unsubscribe = () => {};
 
   try {
-    const { session } = await getFxRuntime();
+    const runtime = await getFxRuntime();
+    unsubscribe = runtime.subscribe((event) => handleHostEvent(event));
+    const { session } = runtime;
     turn = session.prompt(prompt.trim(), { signal: request.signal });
   } catch (error) {
+    unsubscribe();
     const busy =
       error instanceof Error && error.message.includes("already in progress");
     return Response.json(
@@ -50,28 +65,53 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      let closed = false;
+      const send = (event: FxStreamEvent) => {
+        if (!closed) controller.enqueue(encodeFxStreamEvent(event));
+      };
+      const publishHostEvent = (event: unknown) => {
+        for (const normalized of normalizeHostEvent(event)) send(normalized);
+      };
+
+      send({
+        type: "turn-start",
+        timestamp: startedAt,
+        model: getFxDisplayModel(),
+      });
+      handleHostEvent = publishHostEvent;
+      for (const event of pendingHostEvents) publishHostEvent(event);
+      pendingHostEvents = [];
+
       void (async () => {
         try {
           for await (const update of turn) {
-            const text = update.content?.text;
-
-            if (
-              update.sessionUpdate === "agent_message_chunk" &&
-              text &&
-              !text.startsWith("[context]")
-            ) {
-              controller.enqueue(encoder.encode(text));
-            }
+            for (const normalized of normalizeFxUpdate(update)) send(normalized);
           }
 
-          await turn.stopReason;
+          const stopReason = await turn.stopReason;
+          send({
+            type: "finish",
+            timestamp: Date.now(),
+            stopReason,
+            durationMs: Date.now() - startedAt,
+          });
+          closed = true;
           controller.close();
         } catch (error) {
-          controller.error(error);
+          send({
+            type: "error",
+            timestamp: Date.now(),
+            message: error instanceof Error ? error.message : "FX stream failed.",
+          });
+          closed = true;
+          controller.close();
+        } finally {
+          unsubscribe();
         }
       })();
     },
     cancel() {
+      unsubscribe();
       turn.cancel();
     },
   });
@@ -79,7 +119,7 @@ export async function POST(request: Request) {
   return new Response(stream, {
     headers: {
       "Cache-Control": "no-cache, no-store",
-      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
       "X-Content-Type-Options": "nosniff",
     },
   });

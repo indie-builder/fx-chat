@@ -22,7 +22,9 @@ declare module "libfx" {
   export function createFxAgent(options: {
     backend?: "auto" | "native" | "wasm";
     env?: Record<string, string | undefined>;
+    fetch?: typeof globalThis.fetch;
     workspaceRoot?: string;
-    onPermission?: () => Promise<string | null>;
+    onEvent?: (event: unknown) => void;
+    onPermission?: (request: unknown) => Promise<string | null>;
   }): Promise<FxAgent>;
 }

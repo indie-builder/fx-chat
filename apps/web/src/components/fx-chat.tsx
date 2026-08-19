@@ -8,6 +8,8 @@ import {
 } from "@/components/ai-elements/conversation";
 import {
   Message,
+  MessageAction,
+  MessageActions,
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
@@ -20,15 +22,28 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import {
+  FxTurnActivity,
+  FxTurnFooter,
+} from "@/components/fx-turn-details";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
+import { readFxEventStream, type FxStreamEvent } from "@/lib/fx-stream";
+import { cn } from "@/lib/utils";
+import {
+  applyFxStreamEvent,
+  createFxTurnDetails,
+  type FxTurnDetails,
+} from "@/lib/fx-turn-state";
 import type { ChatStatus } from "ai";
-import { PlusIcon, TerminalSquareIcon } from "lucide-react";
+import { CopyIcon, PlusIcon, SparklesIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  details?: FxTurnDetails;
 };
 
 export function FxChat({
@@ -52,6 +67,23 @@ export function FxChat({
     );
   };
 
+  const applyAssistantEvent = (id: string, event: FxStreamEvent) => {
+    setMessages((current) =>
+      current.map((message) => {
+        if (message.id !== id) return message;
+        const result = applyFxStreamEvent(
+          message.details ?? createFxTurnDetails(),
+          event
+        );
+        return {
+          ...message,
+          content: `${message.content}${result.textDelta ?? ""}`,
+          details: result.details,
+        };
+      })
+    );
+  };
+
   const sendPrompt = async ({ text }: PromptInputMessage) => {
     const prompt = text.trim();
     if (!configured || !prompt || isBusy) return;
@@ -59,13 +91,19 @@ export function FxChat({
     const userId = crypto.randomUUID();
     const assistantId = crypto.randomUUID();
     const controller = new AbortController();
+    const requestStartedAt = Date.now();
     abortController.current = controller;
     setInput("");
     setStatus("submitted");
     setMessages((current) => [
       ...current,
       { id: userId, role: "user", content: prompt },
-      { id: assistantId, role: "assistant", content: "" },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        details: createFxTurnDetails(),
+      },
     ]);
 
     try {
@@ -85,27 +123,38 @@ export function FxChat({
 
       if (!response.body) throw new Error("FX returned an empty stream.");
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let content = "";
+      let receivedText = false;
+      let streamError: string | undefined;
       setStatus("streaming");
 
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        content += decoder.decode(value, { stream: true });
-        updateAssistant(assistantId, content);
-      }
+      await readFxEventStream(response.body, (event) => {
+        if (event.type === "text-delta") receivedText = true;
+        if (event.type === "error") streamError = event.message;
+        applyAssistantEvent(assistantId, event);
+      });
 
-      content += decoder.decode();
-      updateAssistant(assistantId, content || "FX completed without a text response.");
+      if (streamError) throw new Error(streamError);
+      if (!receivedText) {
+        updateAssistant(assistantId, "FX completed without a text response.");
+      }
       setStatus("ready");
     } catch (error) {
       if (controller.signal.aborted) {
+        applyAssistantEvent(assistantId, {
+          type: "finish",
+          timestamp: Date.now(),
+          stopReason: "cancelled",
+          durationMs: Date.now() - requestStartedAt,
+        });
         updateAssistant(assistantId, "Stopped.");
         setStatus("ready");
       } else {
         const message = error instanceof Error ? error.message : "Unknown error.";
+        applyAssistantEvent(assistantId, {
+          type: "error",
+          timestamp: Date.now(),
+          message,
+        });
         updateAssistant(assistantId, `**FX error:** ${message}`);
         setStatus("error");
       }
@@ -135,7 +184,10 @@ export function FxChat({
               <h1 className="text-sm font-medium">FX Chat</h1>
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span
-                  className={`size-1.5 rounded-full ${configured ? "bg-emerald-500" : "bg-amber-500"}`}
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    configured ? "bg-primary" : "bg-destructive"
+                  )}
                 />
                 <span className="font-mono">{model}</span>
                 <span aria-hidden="true">·</span>
@@ -143,15 +195,18 @@ export function FxChat({
               </p>
             </div>
           </div>
-          <Button
-            aria-label="New chat"
-            disabled={messages.length === 0 && !isBusy}
-            onClick={() => void reset()}
-            size="icon"
-            variant="ghost"
-          >
-            <PlusIcon className="size-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <Button
+              aria-label="New chat"
+              disabled={messages.length === 0 && !isBusy}
+              onClick={() => void reset()}
+              size="icon"
+              variant="ghost"
+            >
+              <PlusIcon data-icon />
+            </Button>
+          </div>
         </header>
 
         <Conversation className="min-h-0">
@@ -159,12 +214,12 @@ export function FxChat({
             {messages.length === 0 ? (
               <ConversationEmptyState
                 className="min-h-[55svh]"
-                icon={<TerminalSquareIcon className="size-10" />}
-                title="Ask FX about this workspace"
+                icon={<SparklesIcon className="size-8" />}
+                title="How can FX help?"
                 description={
                   configured
-                    ? "Messages stream from the embedded FX agent."
-                    : "Add AI_GATEWAY_API_KEY to apps/web/.env.local, then restart the dev server."
+                    ? "Ask a question about the project or start a coding task."
+                    : "Add KIMI_API_KEY to apps/web/.env.local, then restart the dev server."
                 }
               />
             ) : (
@@ -172,15 +227,39 @@ export function FxChat({
                 <Message from={message.role} key={message.id}>
                   <MessageContent>
                     {message.role === "assistant" ? (
-                      message.content ? (
-                        <MessageResponse isAnimating={isBusy}>
-                          {message.content}
-                        </MessageResponse>
-                      ) : (
-                        <span className="animate-pulse text-muted-foreground" role="status">
-                          FX is working…
-                        </span>
-                      )
+                      <>
+                        {message.details ? (
+                          <FxTurnActivity
+                            details={message.details}
+                            hasResponse={Boolean(message.content)}
+                          />
+                        ) : null}
+                        {message.content ? (
+                          <MessageResponse
+                            isAnimating={
+                              isBusy && message.id === messages.at(-1)?.id
+                            }
+                          >
+                            {message.content}
+                          </MessageResponse>
+                        ) : null}
+                        {message.content && message.details?.phase === "complete" ? (
+                          <MessageActions className="-ml-2 mt-1">
+                            <MessageAction
+                              label="Copy response"
+                              onClick={() =>
+                                void navigator.clipboard.writeText(message.content)
+                              }
+                              tooltip="Copy response"
+                            >
+                              <CopyIcon />
+                            </MessageAction>
+                          </MessageActions>
+                        ) : null}
+                        {message.details ? (
+                          <FxTurnFooter details={message.details} />
+                        ) : null}
+                      </>
                     ) : (
                       <p className="whitespace-pre-wrap">{message.content}</p>
                     )}
@@ -192,7 +271,7 @@ export function FxChat({
           <ConversationScrollButton />
         </Conversation>
 
-        <footer className="shrink-0 border-t bg-background/95 px-4 py-4 sm:px-6">
+        <footer className="shrink-0 bg-background px-4 pb-5 pt-2 sm:px-6">
           <PromptInput
             className="mx-auto max-w-3xl"
             onSubmit={(message) => void sendPrompt(message)}
@@ -202,7 +281,7 @@ export function FxChat({
                 aria-label="Message FX"
                 disabled={!configured}
                 onChange={(event) => setInput(event.currentTarget.value)}
-                placeholder={configured ? "Ask FX…" : "Configure AI_GATEWAY_API_KEY to start"}
+                placeholder={configured ? "Ask FX…" : "Configure a server API key to start"}
                 value={input}
               />
             </PromptInputBody>

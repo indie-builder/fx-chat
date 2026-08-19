@@ -4,7 +4,7 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**"],
-      "env": ["AI_GATEWAY_API_KEY", "FX_MODEL"]
+      "env": ["KIMI_API_KEY", "FX_MODEL"]
     },
     "dev": {
       "cache": false,
@@ -13,6 +13,9 @@
     },
     "lint": {
       "dependsOn": ["^lint"]
+    },
+    "test": {
+      "dependsOn": ["^test"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck"]
