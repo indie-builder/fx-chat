@@ -49,7 +49,6 @@ import {
   SquareIcon,
   XIcon,
 } from "lucide-react";
-import { nanoid } from "nanoid";
 import type {
   ChangeEvent,
   ChangeEventHandler,
@@ -83,12 +82,12 @@ const convertBlobUrlToDataUrl = async (url: string): Promise<string | null> => {
     const response = await fetch(url);
     const blob = await response.blob();
     // FileReader uses callback-based API, wrapping in Promise is necessary
-    // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
+    // oxlint-disable-next-line promise/avoid-new
     return new Promise((resolve) => {
       const reader = new FileReader();
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+      // oxlint-disable-next-line unicorn/prefer-add-event-listener
       reader.onloadend = () => resolve(reader.result as string);
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+      // oxlint-disable-next-line unicorn/prefer-add-event-listener
       reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
     });
@@ -119,11 +118,11 @@ const captureScreenshot = async (): Promise<File | null> => {
     video.srcObject = stream;
 
     // Video element uses callback-based API, wrapping in Promise is necessary
-    // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
+    // oxlint-disable-next-line promise/avoid-new
     await new Promise<void>((resolve, reject) => {
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+      // oxlint-disable-next-line unicorn/prefer-add-event-listener
       video.onloadedmetadata = () => resolve();
-      // oxlint-disable-next-line eslint-plugin-unicorn(prefer-add-event-listener)
+      // oxlint-disable-next-line unicorn/prefer-add-event-listener
       video.onerror = () => reject(new Error("Failed to load screen stream"));
     });
 
@@ -145,7 +144,7 @@ const captureScreenshot = async (): Promise<File | null> => {
 
     context.drawImage(video, 0, 0, width, height);
     // canvas.toBlob uses callback-based API, wrapping in Promise is necessary
-    // oxlint-disable-next-line eslint-plugin-promise(avoid-new)
+    // oxlint-disable-next-line promise/avoid-new
     const blob = await new Promise<Blob | null>((resolve) => {
       canvas.toBlob(resolve, "image/png");
     });
@@ -271,7 +270,7 @@ export const PromptInputProvider = ({
       ...prev,
       ...incoming.map((file) => ({
         filename: file.name,
-        id: nanoid(),
+        id: crypto.randomUUID(),
         mediaType: file.type,
         type: "file" as const,
         url: URL.createObjectURL(file),
@@ -614,7 +613,7 @@ export const PromptInput = ({
         for (const file of capped) {
           next.push({
             filename: file.name,
-            id: nanoid(),
+            id: crypto.randomUUID(),
             mediaType: file.type,
             type: "file",
             url: URL.createObjectURL(file),
@@ -829,7 +828,7 @@ export const PromptInput = ({
         const array = Array.isArray(incoming) ? incoming : [incoming];
         setReferencedSources((prev) => [
           ...prev,
-          ...array.map((s) => ({ ...s, id: nanoid() })),
+          ...array.map((s) => ({ ...s, id: crypto.randomUUID() })),
         ]);
       },
       clear: clearReferencedSources,
@@ -1366,7 +1365,7 @@ export const PromptInputTabLabel = ({
   ...props
 }: PromptInputTabLabelProps) => (
   // Content provided via children in props
-  // oxlint-disable-next-line eslint-plugin-jsx-a11y(heading-has-content)
+  // oxlint-disable-next-line jsx-a11y/heading-has-content
   <h3
     className={cn(
       "mb-2 px-3 font-medium text-muted-foreground text-xs",

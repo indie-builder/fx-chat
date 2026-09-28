@@ -1,15 +1,15 @@
 # FX Chat
 
-A minimal pnpm Turborepo that embeds the experimental FX agent behind a
+A minimal Bun workspace that embeds the experimental FX agent behind a
 Next.js chat page.
 
 ## Run locally
 
 ```bash
-pnpm install
+bun install
 cp apps/web/.env.example apps/web/.env.local
 # Add KIMI_API_KEY to apps/web/.env.local
-pnpm dev
+bun dev
 ```
 
 Open <http://localhost:3000>.
@@ -20,8 +20,8 @@ Open <http://localhost:3000>.
 - `apps/web/src/app/api/fx/route.ts` — streams normalized FX ACP updates as NDJSON.
 - `apps/web/src/lib/fx.ts` — owns the process-local FX agent and session.
 
-The server creates one `libfx@0.0.3` agent and session, then uses a custom host
-`fetch` adapter to translate FX's Language Model v3 request into Kimi Coding's
+The server creates one `libfx@0.0.11` agent and session, then uses a custom host
+`fetch` adapter to translate FX's Language Model v4 request into Kimi Coding's
 Anthropic-compatible protocol. The API key never reaches the browser.
 
 ## Model
