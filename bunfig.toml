@@ -1,0 +1,8 @@
+# Bun workspace configuration.
+# Scripts run binaries through their node shebang (next, tsc, eslint), keeping
+# the libfx native module on the Node runtime it targets.
+
+[install]
+# Pin newly added dependencies to exact versions, matching the existing
+# exact-pin style for core packages (next, react, libfx, @ai-sdk/*).
+exact = true
